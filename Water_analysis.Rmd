@@ -1,0 +1,429 @@
+---
+title: "Water_analysis"
+author: "Elena Suranova"
+date: "2025-03-18"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+# Study of Water Quality by Hardness and pH Parameters
+
+
+## In this study, I will use the cleaned and prepared data from the first part of the project.
+
+```{r}
+stations_clean <- readRDS("stations_clean.RDS")
+period_of_record_clean <- readRDS("period_of_record_clean.RDS")
+lab_results_clean <- readRDS("lab_results_clean.RDS")
+field_results_clean <- readRDS("field_results_clean.RDS")
+```
+
+## Data Selection for Study
+
+Data related to water hardness and pH from the lab_results_clean and field_results_clean tables.
+
+```{r}
+# Unique parameters in lab_results_clean
+unique_lab_parameters <- unique(lab_results_clean$parameter)
+cat("Unique parameters in lab_results_clean:\n")
+print(unique_lab_parameters)
+```
+
+For the analysis of water hardness, the following parameters can be used:
+
+Dissolved Calcium: Calcium is a major component affecting water hardness. High levels of calcium may indicate hard water.
+Dissolved Magnesium: Magnesium, like calcium, is a key element determining water hardness.
+Total Hardness: A direct measure of water hardness, accounting for calcium and magnesium concentrations.
+For the study, I will use the general parameter Total Hardness from the lab_results_clean table.
+
+```{r}
+# Unique parameters in field_results_clean
+unique_field_parameters <- unique(field_results_clean$parameter)
+cat("\nUnique parameters in field_results_clean:\n")
+print(unique_field_parameters)
+```
+
+From the field water analysis results table, I will use the Conductance parameter because water conductivity can be an indirect indicator of hardness, as it depends on the concentration of dissolved ions, including calcium and magnesium.
+
+# Study
+
+
+Since I will only consider two parameters, I believe that using temporary tables will simplify the analysis.
+
+```{r}
+library(dplyr)
+# Temporary table for pH
+ph_lab <- lab_results_clean %>% filter(parameter == "pH")
+ph_field <- field_results_clean %>% filter(parameter == "pH")
+
+# Temporary table for hardness
+hardness_lab <- lab_results_clean %>% filter(parameter == "Total Hardness")
+hardness_field <- field_results_clean %>% filter(parameter == "Conductance")
+```
+
+## Data Distribution Analysis
+
+Analysis of pH distribution:
+```{r}
+# Histogram for pH (lab data)
+hist(ph_lab$result, main = "pH Distribution (Lab Data)", xlab = "pH", col = "lightblue", breaks = 30)
+
+# Histogram for pH (field data)
+hist(ph_field$fdr_result, main = "pH Distribution (Field Data)", xlab = "pH", col = "lightgreen", breaks = 30)
+```
+The diagram revealed outliers. pH values were concentrated around zero, and the X-axis had a very large range. Knowing that the normal pH range for water is 0 to 14, the graphs show outliers far beyond this range (up to 200+ and even 7000+ on the first graph). This indicates the presence of anomalous values in the data.
+
+```{r}
+# Filtering anomalous pH values
+ph_lab_clean <- ph_lab %>% filter(result >= 0 & result <= 14)
+ph_field_clean <- ph_field %>% filter(fdr_result >= 0 & fdr_result <= 14)
+
+# Histogram for pH (lab data)
+hist(ph_lab_clean$result, main = "pH Distribution (Lab Data)", xlab = "pH", col = "lightblue", breaks = 30)
+
+# Histogram for pH (field data)
+hist(ph_field_clean$fdr_result, main = "pH Distribution (Field Data)", xlab = "pH", col = "lightgreen", breaks = 30)
+```
+
+### Scatter Plot for pH
+
+```{r}
+library(ggplot2)
+# Combine data for scatter plot
+combined_ph_data <- data.frame(
+  pH = c(ph_lab_clean$result, ph_field_clean$fdr_result),
+  Source = c(rep("Lab", nrow(ph_lab_clean)), rep("Field", nrow(ph_field_clean)))
+)
+
+# Scatter plot
+ggplot(combined_ph_data, aes(x = Source, y = pH, color = Source)) +
+  geom_point(alpha = 0.5, position = position_jitter(width = 0.2)) +
+  theme_minimal() +
+  labs(title = "pH Scatter Plot",
+       x = "Data Source",
+       y = "pH",
+       color = "Data Source")
+```
+
+Here you can clearly see that field water samples show high pH levels, while such high levels are not found in lab samples. I assume this may be due to the time it takes to deliver water to the lab, changes in water composition due to air exposure in the container (non-compliance with water sampling protocols), prolonged storage of the water sample before reaching the lab, and other factors. This is a reason for an in-depth analysis of the delta between pH 10 and above between Field and Lab. Also, the presence of zero values only in field conditions. Visualization clearly shows the difference in how pH levels depend on the method of water analysis.
+
+### Histogram for Hardness (Lab Data)
+
+```{r}
+hist(hardness_lab$result, main = "Water Hardness Distribution (Lab Data)", xlab = "Total Hardness", col = "lightblue", breaks = 30)
+```
+The graph revealed that data needs to be checked for outliers because the boundaries for Total Hardness are: Water hardness is usually measured in milligrams per liter (mg/L) or parts per million (ppm). Soft water: 0-60 mg/L, Moderately hard water: 61-120 mg/L, Hard water: 121-180 mg/L, Very hard water: >180 mg/L.
+
+
+```{r}
+# Unique units for Total Hardness
+unique_units <- unique(hardness_lab$units)
+cat("Unique units for Total Hardness:\n")
+print(unique_units)
+
+# Statistical data for Total Hardness
+summary(hardness_lab$result)
+```
+Very large values were found. Filtering: Remove values that exceed a reasonable range (e.g., >1000 mg/L).
+
+```{r}
+# Filtering anomalous Total Hardness values
+hardness_lab_clean <- hardness_lab %>% filter(result >= 0 & result <= 1000)
+
+# Histogram for Total Hardness (lab data)
+hist(hardness_lab_clean$result, main = "Water Hardness Distribution (Lab Data)", xlab = "Total Hardness (mg/L)", col = "lightblue", breaks = 30)
+```
+### Histogram for Conductance (Field Data)
+
+```{r}
+hist(hardness_field$fdr_result, main = "Conductance Distribution (Field Data)", xlab = "Conductance", col = "lightgreen", breaks = 30)
+```
+The graph revealed that data needs to be checked for outliers because the boundaries are: Conductivity is usually measured in microsiemens per centimeter (µS/cm). Freshwater: < 1500 µS/cm, Moderately saline water: 1500-5000 µS/cm, Saline water: > 5000 µS/cm.
+
+```{r}
+# Filtering anomalous Conductance values
+conductance_field_clean <- hardness_field %>% filter(fdr_result >= 0 & fdr_result <= 4000)
+
+# Histogram for Conductance (field data)
+hist(conductance_field_clean$fdr_result, main = "Conductance Distribution (Field Data)", xlab = "Conductance", col = "lightgreen", breaks = 30)
+```
+
+# Study of water of North California 
+
+Approximate Coordinates for Northern California
+Latitude: from 38.0 to 42.0
+Longitude: from -124.5 to -120.0
+
+Filter Data by Coordinates, Analyze pH Level Changes Over Time:
+
+Use the sampling date data to analyze temporal changes.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+
+# Filter stations in Northern California
+north_california_stations <- stations_clean %>%
+  filter(latitude >= 38.0 & latitude <= 42.0,
+         longitude >= -124.5 & longitude <= -120.0)
+
+# Get station_id for Northern California
+north_california_station_ids <- north_california_stations$station_id
+
+# Filter pH data for Northern California
+ph_north_cal_lab <- ph_lab_clean %>% filter(station_id %in% north_california_station_ids)
+ph_north_cal_field <- ph_field_clean %>% filter(station_id %in% north_california_station_ids)
+
+# Combine data and convert date
+ph_north_cal_lab$sample_date <- as.Date(ph_north_cal_lab$sample_date)
+ph_north_cal_field$sample_date <- as.Date(ph_north_cal_field$sample_date)
+
+# Plot pH level changes over time
+ggplot() +
+  geom_line(data = ph_north_cal_lab, aes(x = sample_date, y = result, color = "Lab"), alpha = 0.7) +
+  geom_line(data = ph_north_cal_field, aes(x = sample_date, y = fdr_result, color = "Field"), alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "pH Level Changes Over Time in Northern California",
+       x = "Date",
+       y = "pH",
+       color = "Data Source")
+```
+
+On the graph, observed that data is available from 1915, but there are very few records, so I can filter out data before 1940.
+
+```{r}
+# Filter data from 1940 onwards
+ph_north_cal_lab <- ph_north_cal_lab %>% filter(sample_date >= as.Date("1940-01-01"))
+ph_north_cal_field <- ph_north_cal_field %>% filter(sample_date >= as.Date("1940-01-01"))
+
+# Plot pH level changes over time
+ggplot() +
+  geom_line(data = ph_north_cal_lab, aes(x = sample_date, y = result, color = "Lab"), alpha = 0.5) +
+  geom_line(data = ph_north_cal_field, aes(x = sample_date, y = fdr_result, color = "Field"), alpha = 0.5) +
+  theme_minimal() +
+  labs(title = "pH Level Changes Over Time in Northern California (from 1940)",
+       x = "Date",
+       y = "pH",
+       color = "Data Source")
+```
+Visually, we can see that field water studies only began around 1950; before that, only laboratory studies were conducted. The graph also shows that starting from 1990, more field studies were conducted, and from around 1995, field study results began to show water with pH levels above 10 and below 2.5. This either indicates the use of high-precision modern equipment in field laboratories or is related to something else.
+
+#### Сreate separate plots for groundwater and surface water sources by filtering the data based on station_type.
+
+```{r}
+# Unique station types in lab_results_clean
+unique_station_types_lab <- unique(lab_results_clean$station_type)
+cat("Unique station types in lab_results_clean:\n")
+print(unique_station_types_lab)
+
+# Unique station types in field_results_clean
+unique_station_types_field <- unique(field_results_clean$station_type)
+cat("\nUnique station types in field_results_clean:\n")
+print(unique_station_types_field)
+```
+```{r}
+# Filtering groundwater sources
+ph_groundwater_lab <- ph_north_cal_lab %>% filter(station_type == "Groundwater")
+ph_groundwater_field <- ph_north_cal_field %>% filter(station_type == "Groundwater")
+
+# Filtering surface water sources
+ph_surfacewater_lab <- ph_north_cal_lab %>% filter(station_type == "Surface Water")
+ph_surfacewater_field <- ph_north_cal_field %>% filter(station_type == "Surface Water")
+
+```
+
+
+```{r}
+# Plot for groundwater sources
+ggplot() +
+  geom_line(data = ph_groundwater_lab, aes(x = sample_date, y = result, color = "Lab"), alpha = 0.7) +
+  geom_line(data = ph_groundwater_field, aes(x = sample_date, y = fdr_result, color = "Field"), alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "pH Level Changes Over Time for Groundwater Sources",
+       x = "Date",
+       y = "pH",
+       color = "Data Source")
+```
+
+```{r}
+# Plot for surface water sources
+ggplot() +
+  geom_line(data = ph_surfacewater_lab, aes(x = sample_date, y = result, color = "Lab"), alpha = 0.7) +
+  geom_line(data = ph_surfacewater_field, aes(x = sample_date, y = fdr_result, color = "Field"), alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "pH Level Changes Over Time for Surface Water Sources",
+       x = "Date",
+       y = "pH",
+       color = "Data Source")
+```
+By the end of the last century, after 1995, it is visible on the graph that surface water sources sharply reduced water research in laboratory conditions, and then in some years until 2005, it was almost zero, and water quality monitoring was only carried out in field conditions. From 2005 to 2015, there is a small stage of laboratory research, and then observations are almost absent again until 2021.
+
+
+## Investigating water in Northern California by hardness parameters. 
+
+I decided to take a more specific region of Northern California, namely the one where I live - Placer. For the study of hardness, I will use only laboratory research.
+
+
+
+
+```{r}
+library(leaflet)
+library(dplyr)
+
+# Filtering data by laboratory analysis
+hardness_lab <- lab_results_clean %>% filter(parameter == "Total Hardness")
+
+# Filtering data by geographic coordinates
+placer_county_data <- stations_clean %>%
+  filter(latitude >= 38.7542 & latitude <= 39.3122,
+         longitude >= -121.5047 & longitude <= -120.0260)
+
+# Getting station_id for Placer County
+placer_county_station_ids <- placer_county_data$station_id
+
+# Filtering hardness data for Placer County
+hardness_placer_lab <- hardness_lab %>% filter(station_id %in% placer_county_station_ids)
+
+# Number of rows in hardness_placer_lab
+nrow(hardness_placer_lab)
+```
+```{r}
+
+# Filtering data by geographic coordinates
+placer_county_data <- stations_clean %>%
+  filter(latitude >= 38.7542 & latitude <= 39.3122,
+         longitude >= -121.5047 & longitude <= -120.0260)
+
+# Getting station_id for Placer County
+placer_county_station_ids <- placer_county_data$station_id
+
+# Filtering hardness data for Placer County
+hardness_placer_lab <- hardness_lab %>% filter(station_id %in% placer_county_station_ids)
+
+# Separating into groundwater and surface water sources
+placer_county_groundwater <- placer_county_data %>% filter(station_type == "Groundwater")
+placer_county_surfacewater <- placer_county_data %>% filter(station_type == "Surface Water")
+
+# Creating a map
+leaflet(data = placer_county_data) %>%
+  addTiles() %>%
+  addCircleMarkers(data = placer_county_groundwater, ~longitude, ~latitude, 
+                   radius = 5, 
+                   fillOpacity = 0.5,
+                   color = "blue",
+                   popup = ~paste("Station ID:", station_id, "\n", "Station Name:", station_name)) %>%
+  addCircleMarkers(data = placer_county_surfacewater, ~longitude, ~latitude, 
+                   radius = 5, 
+                   fillOpacity = 0.5,
+                   color = "red",
+                   popup = ~paste("Station ID:", station_id, "\n", "Station Name:", station_name)) %>%
+  addLegend("bottomright", colors = c("blue", "red"), labels = c("Groundwater", "Surface Water"), title = "Legend")
+```
+
+
+```{r}
+# Filtering data by geographic coordinates and source type
+placer_county_surfacewater <- stations_clean %>%
+  filter(latitude >= 38.7542 & latitude <= 39.3122,
+         longitude >= -121.5047 & longitude <= -120.0260,
+         station_type == "Surface Water")
+
+# Getting station_id for surface water sources
+placer_county_surfacewater_station_ids <- placer_county_surfacewater$station_id
+
+# Filtering hardness data for surface water sources
+hardness_placer_surfacewater <- hardness_lab %>% filter(station_id %in% placer_county_surfacewater_station_ids)
+
+# Determining water hardness category
+hardness_placer_surfacewater$hardness_category <- ifelse(hardness_placer_surfacewater$result < 60, "Soft",
+                                                        ifelse(hardness_placer_surfacewater$result < 120, "Moderately Hard",
+                                                               ifelse(hardness_placer_surfacewater$result < 180, "Hard", "Very Hard")))
+
+# Creating a map
+leaflet(data = hardness_placer_surfacewater) %>%
+  addTiles() %>%
+  addCircleMarkers(~longitude, ~latitude, 
+                   radius = 5, 
+                   fillOpacity = 0.5,
+                   color = ~ifelse(hardness_category == "Soft", "blue",
+                                    ifelse(hardness_category == "Moderately Hard", "green",
+                                           ifelse(hardness_category == "Hard", "yellow", "red"))),
+                   popup = ~paste("Station ID:", station_id, "\n", "Station Name:", station_name, "\n", "Hardness:", result, "\n", "Category:", hardness_category)) %>%
+  addLegend("bottomright", colors = c("blue", "green", "yellow", "red"), labels = c("Soft", "Moderately Hard", "Hard", "Very Hard"), title = "Legend") %>%
+  addControl("Surface Water Hardness Levels in Placer County", position = "topright")
+```
+
+
+
+As a rule, water from surface sources should not have high total dissolved solids and should not be hard or very hard. Therefore, the yellow dots on the map should be studied in more detail, especially those that are located on small streams in agricultural areas. 
+
+```{r}
+library(leaflet)
+library(dplyr)
+
+# Filtering data by geographic coordinates and source type
+placer_county_groundwater <- stations_clean %>%
+  filter(latitude >= 38.7542 & latitude <= 39.3122,
+         longitude >= -121.5047 & longitude <= -120.0260,
+         station_type == "Groundwater")
+
+# Getting station_id for groundwater sources
+placer_county_groundwater_station_ids <- placer_county_groundwater$station_id
+
+# Filtering hardness data for groundwater sources
+hardness_placer_groundwater <- hardness_lab %>% filter(station_id %in% placer_county_groundwater_station_ids)
+
+# Determining water hardness category
+hardness_placer_groundwater$hardness_category <- ifelse(hardness_placer_groundwater$result < 60, "Soft",
+                                                        ifelse(hardness_placer_groundwater$result < 120, "Moderately Hard",
+                                                               ifelse(hardness_placer_groundwater$result < 180, "Hard", "Very Hard")))
+
+# Creating a map
+leaflet(data = hardness_placer_groundwater) %>%
+  addTiles() %>%
+  addCircleMarkers(~longitude, ~latitude, 
+                   radius = 5, 
+                   fillOpacity = 0.5,
+                   color = ~ifelse(hardness_category == "Soft", "blue",
+                                    ifelse(hardness_category == "Moderately Hard", "green",
+                                           ifelse(hardness_category == "Hard", "yellow", "red"))),
+                   popup = ~paste("Station ID:", station_id, "\n", "Station Name:", station_name, "\n", "Hardness:", result, "\n", "Category:", hardness_category)) %>%
+  addLegend("bottomright", colors = c("blue", "green", "yellow", "red"), labels = c("Soft", "Moderately Hard", "Hard", "Very Hard"), title = "Legend") %>%
+  addControl("Groundwater Hardness Levels in Placer County", position = "topright")
+```
+
+
+```{r}
+# Filtering data by geographic coordinates and source type
+placer_county_groundwater <- stations_clean %>%
+  filter(latitude >= 38.7542 & latitude <= 39.3122,
+         longitude >= -121.5047 & longitude <= -120.0260,
+         station_type == "Groundwater")
+
+# Getting station_id for groundwater sources
+placer_county_groundwater_station_ids <- placer_county_groundwater$station_id
+
+# Filtering hardness data for groundwater sources
+hardness_placer_groundwater <- hardness_lab %>% filter(station_id %in% placer_county_groundwater_station_ids)
+
+# Determining water hardness category
+hardness_placer_groundwater$hardness_category <- ifelse(hardness_placer_groundwater$result < 60, "Soft",
+                                                        ifelse(hardness_placer_groundwater$result < 120, "Moderately Hard",
+                                                               ifelse(hardness_placer_groundwater$result < 180, "Hard", "Very Hard")))
+
+# Selecting stations with high hardness (red dots)
+high_hardness_stations <- hardness_placer_groundwater %>% filter(hardness_category == "Very Hard")
+
+# Creating a table
+high_hardness_stations_table <- data.frame(
+  Station_Name = high_hardness_stations$station_name,
+  County_Name = high_hardness_stations$county_name
+)
+
+# Printing the table
+print(high_hardness_stations_table)
+```
+
