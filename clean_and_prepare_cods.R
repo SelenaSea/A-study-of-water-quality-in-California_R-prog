@@ -1,0 +1,470 @@
+
+
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+
+install.packages(c("tidyverse", "data.table", "httr", "lubridate", "dplyr","purrr"))
+library(tidyverse)
+library(data.table)
+library(httr)
+library(lubridate)
+library(dplyr)
+library(purrr)
+
+
+# 📌 Введение
+
+  # Загрузка данных
+  
+
+# Загрузка пакета
+library(webshot)
+
+# Проверка установки PhantomJS
+if (!webshot::is_phantomjs_installed()) {
+  message("PhantomJS is not installed. Please install it before proceeding.")
+}
+
+library(tidyverse)
+
+tinytex::is_tinytex()
+
+library(tidyverse)
+library(data.table)
+library(httr)
+library(lubridate)
+library(dplyr)
+library(purrr)
+
+
+urls <- c(
+  "https://data.cnra.ca.gov/dataset/3f96977e-2597-4baa-8c9b-c433cea0685e/resource/24fc759a-ff0b-479a-a72a-c91a9384540f/download/stations.csv",
+  "https://data.cnra.ca.gov/dataset/3f96977e-2597-4baa-8c9b-c433cea0685e/resource/8ff3a841-d843-405a-a360-30c740cc8691/download/period_of_record.csv",  
+  "https://data.cnra.ca.gov/dataset/3f96977e-2597-4baa-8c9b-c433cea0685e/resource/a9e7ef50-54c3-4031-8e44-aa46f3c660fe/download/lab_results.csv",
+  "https://data.cnra.ca.gov/dataset/3f96977e-2597-4baa-8c9b-c433cea0685e/resource/1911e554-37ab-44c0-89b0-8d7044dd891d/download/field_results.csv"
+)
+
+download_and_load <- function(url) {
+  temp_file <- tempfile(fileext = ".csv")  #  временный файл
+  GET(url, write_disk(temp_file, overwrite = TRUE))  # Скачиваем файл
+  df <- fread(temp_file)  # Загружаем в R
+  return(df)
+}
+
+
+```
+
+
+```{r}
+data_list <- lapply(urls, download_and_load)  # Применяем функцию ко всем ссылкам
+
+# Разбираем файлы по переменным
+stations <- data_list[[1]]
+period_of_record <- data_list[[2]]
+lab_results <- data_list[[3]]
+field_results <- data_list[[4]]
+
+head(stations)
+head(period_of_record)
+head(lab_results)
+head(field_results)
+
+```
+
+# 🔄 Очистка и предобработка данных
+
+## 📊 Структура и пропущенные значения
+
+```{r}
+str(stations)
+colSums(is.na(stations))
+sum(duplicated(stations))
+```
+Выбираю только название столбцов для каждой таблицы, чтобы определить основные и внешние ключи и составить схему связей между собой таблиц на доске Миро. 
+
+```{r}
+column_names <- colnames(field_results)
+
+# Вывод названий столбцов 
+print(column_names)
+```
+```{r}
+column_names <- colnames(stations)
+
+# Вывод названий столбцов
+print(column_names)
+```
+
+```{r}
+column_names <- colnames(period_of_record)
+
+# Вывод названий столбцов
+print(column_names)
+```
+
+```{r}
+column_names <- colnames(lab_results)
+
+# Вывод названий столбцов
+print(column_names)
+```
+
+
+
+### 1. Проверяю пропущенные значения
+
+Смотрю количество пропусков по каждому столбцу:
+  
+  ```{r}
+colSums(is.na(stations))
+colSums(is.na(period_of_record))
+colSums(is.na(lab_results))
+colSums(is.na(field_results))
+# Вывод результатов
+# Вывод суммы пропусков в каждой таблице
+cat("Total NAs in stations:", sum(is.na(stations)), "\n")
+cat("Total NAs in period_of_record:", sum(is.na(period_of_record)), "\n")
+cat("Total NAs in lab_results:", sum(is.na(lab_results)), "\n")
+cat("Total NAs in field_results:", sum(is.na(field_results)), "\n")
+```
+Есть достаточное количество данных с пропусками, так в таблице о станциях 278 позиций без геоданных 
+в таблице о периодах записей 10253 позиции без геоданных
+в таблице лабораторных исследований 138 083 позиций без геоданных, нет данных о глубине образца (sample_depth) в 2 783 322 записях (но этот показатель я в анализе использовать не планирую, поэтому я исключу его из данных), также как reporting_limit, где 17 470 отсутствуют записи.
+в таблице полевых исследований 12 219 позиции без геоданных, есть много позиций в анализе без результата 130 748 (fdr_result) и без даты результата (fdr_date_result) 1 203 611 и без  fdr_reporting_limit 180 787, также есть 565 093 пустых значения в столбце sample_depth, который не будет использован для анализа
+
+Рассмотрю вариант очистки данных исходя из основной таблице о станциях, исключу из исследований станции у которых отстуствуют кооординаты, это 278 станций. 
+```{r}
+# Удаление станций без координат
+stations_clean <- stations %>% filter(!is.na(latitude) & !is.na(longitude))
+station_ids_with_coords <- stations_clean$station_id
+
+# Фильтрация других таблиц по station_id
+period_of_record_clean <- period_of_record %>% filter(station_id %in% station_ids_with_coords)
+lab_results_clean <- lab_results %>% filter(station_id %in% station_ids_with_coords)
+field_results_clean <- field_results %>% filter(station_id %in% station_ids_with_coords)
+
+# Удаление ненужных столбцов
+lab_results_clean <- lab_results_clean %>% select(-sample_depth, -reporting_limit)
+field_results_clean <- field_results_clean %>% select(-fdr_reporting_limit, -sample_depth)
+
+# Вывод количества оставшихся записей
+cat("Stations remaining:", nrow(stations_clean), "\n")
+cat("Period of record remaining:", nrow(period_of_record_clean), "\n")
+cat("Lab results remaining:", nrow(lab_results_clean), "\n")
+cat("Field results remaining:", nrow(field_results_clean), "\n")
+
+```
+```{r}
+colSums(is.na(stations_clean))
+colSums(is.na(period_of_record_clean))
+colSums(is.na(lab_results_clean))
+colSums(is.na(field_results_clean))
+# Вывод результатов
+# Вывод суммы пропусков в каждой таблице
+cat("Total NAs in stations:", sum(is.na(stations_clean)), "\n")
+cat("Total NAs in period_of_record:", sum(is.na(period_of_record_clean)), "\n")
+cat("Total NAs in lab_results:", sum(is.na(lab_results_clean)), "\n")
+cat("Total NAs in field_results:", sum(is.na(field_results_clean)), "\n")
+```
+
+
+
+### 2. Проверяю дубликаты
+Если есть уникальный идентификатор (ID), проверю дублирующиеся строки:
+  ```{r}
+sum(duplicated(stations_clean))
+sum(duplicated(period_of_record_clean))
+sum(duplicated(lab_results_clean))
+sum(duplicated(field_results_clean))
+```
+обнаружено 966 дубликата в таблице lab_results_clean
+и 44 дубликата в таблице field_results_clean
+
+```{r}
+lab_results_clean <- lab_results_clean %>% distinct()
+field_results_clean <- field_results_clean %>% distinct()
+```
+
+Дубликатов нет. 
+
+
+### 3. Проверяю тип данных
+
+```{r}
+str(stations_clean)
+str(period_of_record_clean)
+str(lab_results_clean)
+str(field_results_clean)
+```
+Имееются цифровые параметры с текстовым типом данных, такие как result, sample_date_min и др.
+есть числовые данные загружены как текст
+
+```{r}
+sapply(stations_clean, class)
+sapply(period_of_record_clean, class)
+sapply(lab_results_clean, class)
+sapply(field_results_clean, class)
+
+```
+
+
+## Преобразование типов
+###  Делаю преобразование таблицы stations_clean
+station_id	integer	integer	✅ Оставляем как есть (это уникальный идентификатор станции).
+station_name	character	character	✅ Оставляем (название станции).
+full_station_name	character	character	✅ Оставляем.
+station_number	character	character	✅ Оставляем.
+station_type	character	factor	🔄 Меняем на factor, так как есть ограниченный список значений (например, "Groundwater").
+latitude	numeric	numeric	✅ Оставляем (широта).
+longitude	numeric	numeric	✅ Оставляем (долгота).
+county_name	character	factor	🔄 Меняем на factor, так как округов ограниченное количество.
+sample_count	integer	integer	✅ Оставляем.
+sample_date_min	character	Date (или POSIXct)	🔄 Меняем на Date/POSIXct, так как это даты.
+sample_date_max	character	Date (или POSIXct)	🔄 Меняем на Date/POSIXct, так как это даты.
+
+Преобразуем station_type и county_name в factor
+
+```{r}
+stations_clean$station_type <- as.factor(stations_clean$station_type)
+stations_clean$county_name <- as.factor(stations_clean$county_name)
+```
+
+Преобразуем sample_date_min и sample_date_max в формат Date или POSIXct
+Формат дат в данных: "06/23/2008 15:00" → mm/dd/yyyy HH:MM
+Используем lubridate::mdy_hm() для преобразования в POSIXct (дата + время):
+  
+  ```{r}  
+stations_clean$sample_date_min <- mdy_hm(stations_clean$sample_date_min)
+stations_clean$sample_date_max <- mdy_hm(stations_clean$sample_date_max)
+```
+
+Если время не критично и нужна только дата, можно оставить Date:
+  ```{r} 
+stations_clean$sample_date_min <- as.Date(stations_clean$sample_date_min)
+stations_clean$sample_date_max <- as.Date(stations_clean$sample_date_max)
+```
+
+### Такие же преобразования провожу для других таблиц
+
+Преобразование таблицы lab_results__clean
+Столбец	Текущий тип	Новый тип	Обоснование
+station_id	integer	integer	✅ Уникальный идентификатор
+station_name	character	character	✅ Название станции
+full_station_name	character	character	✅ Полное название
+station_number	character	character	✅ Номер станции
+station_type	character	factor	🔄 Тип станции (ограниченный список)
+latitude	numeric	numeric	✅ Географическая широта
+longitude	numeric	numeric	✅ Географическая долгота
+county_name	character	factor	🔄 Ограниченный список округов
+sample_date	character	Date	🔄 Дата пробы
+result	character	numeric	🔄 Результат анализа (конвертируем и очищаем от "ND", "Trace")
+```{r} 
+# Преобразование типов
+lab_results_clean$station_type <- as.factor(lab_results_clean$station_type)
+lab_results_clean$county_name <- as.factor(lab_results_clean$county_name)
+
+# Преобразование дат
+lab_results_clean$sample_date <- as.Date(mdy_hm(lab_results_clean$sample_date))
+
+```
+
+Преобразование таблицы field_results_clean
+
+Столбец	Текущий тип	Новый тип	Обоснование
+station_id	integer	integer	✅ Уникальный идентификатор
+station_name	character	character	✅ Название станции
+station_number	character	character	✅ Номер станции
+full_station_name	character	character	✅ Полное название
+station_type	character	factor	🔄 Тип станции (ограниченный список)
+latitude	numeric	numeric	✅ Географическая широта
+longitude	numeric	numeric	✅ Географическая долгота
+county_name	character	factor	🔄 Ограниченный список округов
+sample_date	POSIXct	POSIXct	✅ Время пробы уже в правильном формате
+parameter	character	factor	🔄 Ограниченный список параметров (pH, кислород и др.)
+fdr_result	numeric	numeric	🔄 Очищаем от выбросов
+
+```{r} 
+# Преобразование типов
+field_results_clean$station_type <- as.factor(field_results_clean$station_type)
+field_results_clean$county_name <- as.factor(field_results_clean$county_name)
+field_results_clean$parameter <- as.factor(field_results_clean$parameter)
+
+
+```
+
+Преобразование таблицы period_of_record_clean
+Что меняем?
+  
+  Столбец	Текущий тип	Новый тип	Обоснование
+station_id	integer	integer	✅ Уникальный идентификатор
+station_name	character	character	✅ Название станции
+sample_date_min	character	Date	🔄 Дата первой пробы
+sample_date_max	character	Date	🔄 Дата последней пробы
+
+```{r} 
+# Преобразование дат
+period_of_record_clean$sample_date_min <- as.Date(mdy_hm(period_of_record_clean$sample_date_min))
+period_of_record_clean$sample_date_max <- as.Date(mdy_hm(period_of_record_clean$sample_date_max))
+
+```
+
+### Удаление пробелов и пропусков
+
+посмотрю сколько значений преобразовано в таблице lab_results_clean
+
+```{r}
+# Общее количество значений в столбце result
+total_values <- nrow(lab_results_clean)
+
+# Подсчет количества значений, которые будут преобразованы в NA
+num_converted <- sum(lab_results_clean$result %in% c("ND", "Trace", ""))
+
+# Вывод результатов
+cat("Total values in 'result':", total_values, "\n")
+cat("Values converted to NA:", num_converted, "\n")
+```
+```{r}
+# Очистка и преобразование результатов 
+lab_results_clean <- lab_results_clean %>%
+  mutate(result = as.numeric(ifelse(result %in% c("ND", "Trace", "other_text"), NA, result))) %>%
+  filter(!is.na(result))
+```
+
+```{r}
+#Проверка уникальных значений
+unique_values <- unique(lab_results_clean$result)
+print(head(unique_values))
+```
+
+таким же образом преобразуем оставшиеся 3 другие таблицы
+
+```{r}
+# Очистка и преобразование для stations_clean
+stations_clean <- stations_clean %>%
+  mutate(latitude = as.numeric(ifelse(latitude %in% c("ND", "Trace", "other_text"), NA, latitude))) %>%
+  filter(!is.na(latitude))
+
+# Очистка и преобразование для period_of_record_clean
+period_of_record_clean <- period_of_record_clean %>%
+  mutate(latitude = as.numeric(ifelse(latitude %in% c("ND", "Trace", "other_text"), NA, latitude))) %>%
+  filter(!is.na(latitude))
+
+# Очистка и преобразование для field_results_clean
+field_results_clean <- field_results_clean %>%
+  mutate(fdr_result = as.numeric(ifelse(fdr_result %in% c("ND", "Trace", "other_text"), NA, fdr_result))) %>%
+  filter(!is.na(fdr_result))
+```
+
+Сравню сколько было строк в исходных таблицах и сколько стало теперь после всех преобразований и очистки.
+
+```{r}
+# Количество строк в исходных таблицах
+initial_stations_rows <- nrow(stations)
+initial_period_of_record_rows <- nrow(period_of_record)
+initial_lab_results_rows <- nrow(lab_results)
+initial_field_results_rows <- nrow(field_results)
+```
+
+```{r}
+# Количество строк после очистки
+final_stations_rows <- nrow(stations_clean)
+final_period_of_record_rows <- nrow(period_of_record_clean)
+final_lab_results_rows <- nrow(lab_results_clean)
+final_field_results_rows <- nrow(field_results_clean)
+
+# Вывод результатов
+cat("Stations: initial =", initial_stations_rows, ", final =", final_stations_rows, "\n")
+cat("Period of Record: initial =", initial_period_of_record_rows, ", final =", final_period_of_record_rows, "\n")
+cat("Lab Results: initial =", initial_lab_results_rows, ", final =", final_lab_results_rows, "\n")
+cat("Field Results: initial =", initial_field_results_rows, ", final =", final_field_results_rows, "\n")
+```
+получила: 
+  Stations: initial = 44604 , final = 44326 
+Period of Record: initial = 739214 , final = 728961 
+Lab Results: initial = 4658743 , final = 3666231 
+Field Results: initial = 1208351 , final = 1021931
+
+
+
+# 📍 Географическая карта измерений
+
+## Карта станций мониторинга
+```{r}
+install.packages("ggplot2", "ggmap")
+library(ggplot2)
+
+library(ggmap)
+```
+
+#### Предполагаю, что stations_clean содержит очищенные данные с координатами
+
+### Получение карты с Google Maps теперь требует API ключ для использования карт и OpenStreetMap тоже невозможно, необходим API ключ
+map <- get_map(location = c(lon = mean(stations_clean$longitude, na.rm = TRUE), 
+                            lat = mean(stations_clean$latitude, na.rm = TRUE)), 
+               zoom = 6, source = "osm", maptype = "terrain")
+
+## Построение карты с точками
+ggmap(map) +
+  geom_point(data = stations_clean, aes(x = longitude, y = latitude), 
+             color = "red", alpha = 0.5, size = 2) +
+  labs(title = "Карта мониторинга качества воды",
+       x = "Долгота", y = "Широта")
+
+
+поэтому использую пакет "leaflet"
+
+
+install.packages("leaflet")
+library(leaflet)
+
+# Создание карты
+leaflet(data = stations_clean) %>%
+  addTiles() %>%  # Добавление базовой карты
+  addCircleMarkers(~longitude, ~latitude, 
+                   color = "red", 
+                   radius = 5, 
+                   fillOpacity = 0.5,
+                   popup = ~station_name) %>%
+  addLegend("bottomright", colors = "red", labels = "Stations", title = "Legend")
+
+```
+
+
+
+На полученой карте я обнаружила точку далеко за пределами Калифорнии
+Проверка выбросов на карте. Координаты Калифорнии примерно такие: Широта (Latitude): 32.5 — 42.0. Долгота (Longitude): -124.5 — -114.0, 
+
+Проверяю статистику по широте и долготе
+```{r}
+install.packages("dplyr")
+library(dplyr)
+
+# Фильтрация данных для Калифорнии
+stations_clean <- stations_clean %>%
+  filter(latitude >= 32.5 & latitude <= 42.0,
+         longitude >= -124.5 & longitude <= -114.0)
+
+# Проверка результата
+summary(stations_clean$latitude)
+summary(stations_clean$longitude)
+```
+
+
+## Сохранение таблиц
+Чтобы сохранить эти таблицы, мы можем использовать функцию saveRDS() или write.csv(). Давай сохраним их в формате RDS, который позволяет сохранять данные в бинарном формате и загружать их обратно в R.
+
+R
+
+# Сохранение таблиц
+saveRDS(stations_clean, "stations_clean.RDS")
+saveRDS(period_of_record_clean, "period_of_record_clean.RDS")
+saveRDS(lab_results_clean, "lab_results_clean.RDS")
+saveRDS(field_results_clean, "field_results_clean.RDS")
+Теперь у нас есть четыре файла RDS, содержащие наши очищенные и преобразованные таблицы. Мы можем загрузить их обратно в R, используя функцию readRDS().
+
+R
+
+# Загрузка таблиц
+stations_clean <- readRDS("stations_clean.RDS")
+period_of_record_clean <- readRDS("period_of_record_clean.RDS")
+lab_results_clean <- readRDS("lab_results_clean.RDS")
+field_results_clean <- readRDS("field_results_clean.RDS")
